@@ -1,0 +1,85 @@
+[package]
+name = "eggplant-sdk"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "A highly performant Rust SDK for Polymarket: CLOB trading with all signature types, relayer operations (merge/split/convert/redeem), order-book streams, Gamma and Data APIs"
+license = "MIT"
+repository = "https://github.com/promethean-quantitative/eggplant-sdk-rs"
+documentation = "https://docs.rs/eggplant-sdk"
+readme = "README.md"
+keywords = ["polymarket", "prediction-markets", "clob", "trading", "web3"]
+categories = ["api-bindings", "finance"]
+
+[features]
+default = ["ws", "rpc"]
+# WebSocket market/user channel streams (tokio-tungstenite).
+ws = ["dep:tokio-tungstenite"]
+# On-chain reads via the alloy provider stack: approvals bootstrap and the
+# convert-engine balance snapshots. Calldata builders and the relayer client
+# work without it.
+rpc = ["alloy/contract", "alloy/transport-http"]
+
+[dependencies]
+alloy = { version = "1.6", default-features = false, features = ["signers", "signer-local", "sol-types", "secp256k1", "serde"] }
+base64 = "0.22"
+bytes = "1"
+chrono = { version = "0.4", default-features = false, features = ["now"] }
+futures = "0.3"
+hmac = "0.12"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "ring", "webpki-tokio"] }
+hyper-util = { version = "0.1", features = ["client-legacy", "client-pool", "http1", "tokio"] }
+itoa = "1"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "gzip", "http2", "query"] }
+rust_decimal = { version = "1.42", features = ["serde-with-float"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+secrecy = { version = "0.10", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "net", "sync", "time"] }
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"], optional = true }
+tower-service = "0.3"
+tracing = "0.1"
+uuid = { version = "1", features = ["serde"] }
+
+[dev-dependencies]
+alloy = { version = "1.6", default-features = false, features = ["signers", "signer-local"] }
+chrono = { version = "0.4", default-features = false, features = ["now"] }
+dotenvy = "0.15"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
+rust_decimal = "1.42"
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "test-util", "signal"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Examples that need optional features are skipped when those features are off.
+[[example]]
+name = "stream_order_books"
+required-features = ["ws"]
+
+[[example]]
+name = "stream_user_fills"
+required-features = ["ws"]
+
+[[example]]
+name = "convert_merge_split"
+required-features = ["rpc"]
+
+[[example]]
+name = "approvals_bootstrap"
+required-features = ["rpc"]
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
