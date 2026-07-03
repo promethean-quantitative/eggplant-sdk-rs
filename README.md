@@ -29,20 +29,50 @@ zero dependency on the official SDK.
 
 ## Feature matrix
 
-| Capability                                                      | eggplant-sdk             | official `polymarket_client_sdk_v2`    |
-| --------------------------------------------------------------- | ------------------------ | -------------------------------------- |
-| L1 auth (create/derive API key)                                 | ✓ (golden-vector pinned) | ✓                                      |
-| Signature types 0 / 1 / 2 / Poly1271                            | ✓ all four, one signer   | ✓                                      |
-| Hot posting path (pinned DNS, isolated pools, warm tiers)       | ✓                        | —                                      |
-| Batch + singular place/cancel endpoint switching                | ✓                        | —                                      |
-| Cancel bookkeeping (`partition_cancels`, terminal reasons)      | ✓                        | —                                      |
-| Relayer v2: SAFE / SAFE-CREATE / DepositWallet batches          | ✓                        | —                                      |
-| negRisk merge / **split** / convert / redeem + planning engine  | ✓                        | split/merge/redeem as raw on-chain txs |
-| Lenient order books (`tick_size: Decimal`, per-book parse)      | ✓                        | closed tick enum (breaks on new grids) |
-| Market WS: zero-copy events, text PING/PONG liveness            | ✓                        | owned types                            |
-| User WS: fills/orders + maker-side derivation + dedup           | ✓                        | types only                             |
-| Gamma / Data API clients                                        | ✓                        | ✓                                      |
-| Wallet CREATE2 derivation (proxy + Safe)                        | ✓                        | ✓                                      |
+> ⚠️ **Not (yet) at feature parity with the official Polymarket SDK.** The
+> first table is what this crate supports; the second lists official-SDK
+> surfaces it doesn't implement yet. A Python sibling,
+> [`eggplant-sdk-py`](https://github.com/promethean-quantitative/eggplant-sdk-py),
+> covers the same core surface.
+
+### Supported
+
+| Capability                                                     | eggplant-sdk             | official `polymarket_client_sdk_v2`    |
+| -------------------------------------------------------------- | ------------------------ | -------------------------------------- |
+| L1 auth (create/derive API key)                                | ✓ (golden-vector pinned) | ✓                                      |
+| Signature types 0 / 1 / 2 / Poly1271                           | ✓ all four, one signer   | ✓                                      |
+| Hot posting path (pinned DNS, isolated pools, warm tiers)      | ✓                        | —                                      |
+| Batch + singular place/cancel endpoint switching               | ✓                        | —                                      |
+| Cancel bookkeeping (`partition_cancels`, terminal reasons)     | ✓                        | —                                      |
+| Relayer v2: SAFE / SAFE-CREATE / DepositWallet batches         | ✓                        | —                                      |
+| negRisk merge / **split** / convert / redeem + planning engine | ✓                        | split/merge/redeem as raw on-chain txs |
+| Lenient order books (`tick_size: Decimal`, per-book parse)     | ✓                        | closed tick enum (breaks on new grids) |
+| Market WS: zero-copy events, text PING/PONG liveness           | ✓                        | owned types                            |
+| User WS: fills/orders + maker-side derivation + dedup          | ✓                        | types only                             |
+| Gamma / Data API clients                                       | ✓                        | ✓                                      |
+| Wallet CREATE2 derivation (proxy + Safe)                       | ✓                        | ✓                                      |
+
+### Not (yet) supported
+
+| Capability                                               | eggplant-sdk | official `polymarket_client_sdk_v2` |
+| -------------------------------------------------------- | ------------ | ----------------------------------- |
+| Midpoint / spread / price quote endpoints¹               | —            | ✓                                   |
+| Last-trade-price REST endpoint¹                          | —            | ✓                                   |
+| Market listings & pagination (incl. sampling/simplified) | —            | ✓                                   |
+| Prices-history endpoint                                  | —            | ✓                                   |
+| Single-order lookup (`GET` one order by id)              | —            | ✓                                   |
+| API-key management (list / delete keys)                  | —            | ✓                                   |
+| Balance / allowance helpers (read + update)              | —            | ✓                                   |
+| Notifications (fetch / dismiss)                          | —            | ✓                                   |
+| Rewards & earnings endpoints                             | —            | ✓                                   |
+| Order scoring (`are_orders_scoring`)                     | —            | ✓                                   |
+| Market-order builder with automatic marketable pricing²  | —            | ✓                                   |
+
+¹ Midpoint/spread (and a live last-trade feed) are one-liners off a local
+[`Book`](#4-keep-a-live-order-book) maintained from `/books` + the market
+channel — the REST quote endpoints just aren't wrapped.
+² Taker orders are placed as explicit FOK/FAK limits here (see §3); there is
+no amount-in, price-discovered market-order helper.
 
 ## Install
 
@@ -407,14 +437,14 @@ Rules and defaults the crate encodes:
 Runnable walkthroughs in [`examples/`](examples/) — venue writes are gated
 behind `EGGPLANT_LIVE_TRADE=1`, everything else is read-only:
 
-| example              | shows                                                                           |
-| -------------------- | ------------------------------------------------------------------------------- |
-| `quickstart`         | authenticate (any signature type) → read grid → sign → optionally place+cancel |
-| `stream_order_books` | REST seed + market channel + `Book` maintenance (no credentials)                |
-| `stream_user_fills`  | user channel with dedup, final-status gating, own-maker filtering               |
-| `positions`          | Data API holdings + redeemable listing                                          |
-| `convert_merge_split`| Gamma → legs → read-only plan → optional relayer cycle; split builders          |
-| `approvals_bootstrap`| Safe-path approvals bootstrap                                                   |
+| example               | shows                                                                          |
+| --------------------- | ------------------------------------------------------------------------------ |
+| `quickstart`          | authenticate (any signature type) → read grid → sign → optionally place+cancel |
+| `stream_order_books`  | REST seed + market channel + `Book` maintenance (no credentials)               |
+| `stream_user_fills`   | user channel with dedup, final-status gating, own-maker filtering              |
+| `positions`           | Data API holdings + redeemable listing                                         |
+| `convert_merge_split` | Gamma → legs → read-only plan → optional relayer cycle; split builders         |
+| `approvals_bootstrap` | Safe-path approvals bootstrap                                                  |
 
 ```sh
 POLYMARKET_PRIVATE_KEY=0x… cargo run --example quickstart
