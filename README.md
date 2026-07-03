@@ -1,4 +1,4 @@
-# eggplant-sdk-rs
+# 🍆 eggplant-sdk-rs 🦀
 
 A highly performant rust sdk for Polymarket.
 
