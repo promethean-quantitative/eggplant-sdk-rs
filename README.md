@@ -459,8 +459,6 @@ small sizes first.
 - MSRV 1.88, edition 2024.
 - Relayer operations require API credentials from Polymarket's builder
   program.
-- Portions adapted from the MIT-licensed `polymarket_client_sdk_v2` — see
-  [ATTRIBUTION.md](ATTRIBUTION.md).
 
 ## Disclaimer
 
