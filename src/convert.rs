@@ -125,6 +125,13 @@ sol! {
             uint256[] partition,
             uint256 amount
         ) external;
+
+        function redeemPositions(
+            address collateralToken,
+            bytes32 parentCollectionId,
+            bytes32 conditionId,
+            uint256[] indexSets
+        ) external;
     }
 
     interface ICollateralOnrampOps {
@@ -340,6 +347,29 @@ pub fn build_redeem_calldata(condition_id: &B256, yes_amount: U256, no_amount: U
     INegRiskAdapterOps::redeemPositionsCall {
         conditionId: *condition_id,
         amounts: vec![yes_amount, no_amount],
+    }
+    .abi_encode()
+}
+
+/// Calldata for the plain CTF `redeemPositions` (binary markets):
+/// `parentCollectionId` zero and the outcome `index_sets` to redeem (`[1, 2]`
+/// covers both slots of a binary condition).
+///
+/// Unlike [`build_redeem_calldata`], the CTF redeems the caller's *full*
+/// balance of the given index sets (no per-token amounts) and pays out in
+/// `collateral` — so pass the collateral token the condition was prepared
+/// with. Only meaningful once the condition is resolved.
+#[must_use]
+pub fn build_redeem_calldata_ctf(
+    collateral: Address,
+    condition_id: &B256,
+    index_sets: &[U256],
+) -> Vec<u8> {
+    ICtfOps::redeemPositionsCall {
+        collateralToken: collateral,
+        parentCollectionId: B256::ZERO,
+        conditionId: *condition_id,
+        indexSets: index_sets.to_vec(),
     }
     .abi_encode()
 }
@@ -1675,6 +1705,19 @@ mod tests {
         assert_eq!(
             calls[0].data,
             build_redeem_calldata(&cid, U256::from(1_u64), U256::from(2_u64))
+        );
+    }
+
+    #[test]
+    fn ctf_redeem_calldata_selector_and_layout() {
+        let cid = B256::repeat_byte(0x44);
+        let data = build_redeem_calldata_ctf(USDC_E, &cid, &[U256::from(1_u64), U256::from(2_u64)]);
+        // selector(4) + collateral + parent + conditionId + array offset +
+        // len + 2 elems = 4 + 7*32.
+        assert_eq!(data.len(), 4 + 7 * 32);
+        assert_eq!(
+            &data[..4],
+            &keccak256(b"redeemPositions(address,bytes32,bytes32,uint256[])")[..4]
         );
     }
 

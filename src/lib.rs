@@ -34,6 +34,7 @@ pub mod data;
 pub mod error;
 pub mod fee;
 pub mod gamma;
+pub mod redeem;
 pub mod relayer;
 #[cfg(feature = "ws")]
 pub mod ws;

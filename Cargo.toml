@@ -1,6 +1,6 @@
 [package]
 name = "eggplant-sdk"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.88"
 description = "A highly performant Rust SDK for Polymarket: CLOB trading with all signature types, relayer operations (merge/split/convert/redeem), order-book streams, Gamma and Data APIs"
@@ -71,6 +71,10 @@ required-features = ["rpc"]
 
 [[example]]
 name = "approvals_bootstrap"
+required-features = ["rpc"]
+
+[[example]]
+name = "redeem"
 required-features = ["rpc"]
 
 [lints.rust]
