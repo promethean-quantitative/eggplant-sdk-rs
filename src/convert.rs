@@ -26,7 +26,7 @@ use alloy::primitives::{Address, B256, U256};
 use alloy::sol;
 use alloy::sol_types::SolCall as _;
 
-use crate::chain::{COLLATERAL_ONRAMP, NEG_RISK_ADAPTER, USDC_E};
+use crate::chain::{COLLATERAL, COLLATERAL_ONRAMP, NEG_RISK_COLLATERAL_ADAPTER, USDC_E};
 use crate::error::Error;
 use crate::relayer::DepositWalletCall;
 
@@ -85,27 +85,14 @@ impl Default for ConvertDelays {
 // feature. Selectors derive from the signatures alone.
 sol! {
     interface INegRiskAdapterOps {
+        /// The one op the collateral adapter still takes in its legacy form —
+        /// same calldata as the old `NegRiskAdapter.convertPositions`. Merge /
+        /// redeem / split use the CTF-mirror overloads ([`ICtfOps`]) instead;
+        /// their legacy 2-arg forms exist on the adapter but REVERT.
         function convertPositions(
             bytes32 marketId,
             uint256 indexSet,
             uint256 amount
-        ) external;
-
-        function mergePositions(
-            bytes32 conditionId,
-            uint256 amount
-        ) external;
-
-        /// Merge's inverse: pull `amount` collateral, mint `amount` YES+NO
-        /// on the condition.
-        function splitPosition(
-            bytes32 conditionId,
-            uint256 amount
-        ) external;
-
-        function redeemPositions(
-            bytes32 conditionId,
-            uint256[] amounts
         ) external;
     }
 
@@ -167,7 +154,7 @@ mod rpc_ifaces {
 }
 
 /// One market leg's on-chain identifiers, parsed and ready for planning.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ConvertLeg {
     pub question_id: B256,
     pub condition_id: Option<B256>,
@@ -276,32 +263,35 @@ pub fn build_convert_calldata(question_ids: &[B256], amount: U256) -> Result<Vec
     .abi_encode())
 }
 
-/// Calldata for `NegRiskAdapter.mergePositions`: burn `amount` YES+NO on the
-/// condition for `amount` collateral.
+/// Calldata to merge `amount` YES+NO on `condition_id` back into `amount`
+/// collateral, through the pUSD [`NEG_RISK_COLLATERAL_ADAPTER`].
+///
+/// The adapter mirrors the CTF ABI, so this is the CTF-mirror
+/// `mergePositions(collateralToken, parentCollectionId, conditionId, partition, amount)`
+/// with pUSD collateral, a zero parent collection, and the binary `[1, 2]`
+/// partition — verified against a live UI merge (tx `0xe92073a6…`). The
+/// legacy-style `mergePositions(bytes32,uint256)` overload the old adapter took
+/// still exists in this adapter's bytecode but REVERTS.
 #[must_use]
 pub fn build_merge_calldata(condition_id: &B256, amount: U256) -> Vec<u8> {
-    INegRiskAdapterOps::mergePositionsCall {
-        conditionId: *condition_id,
-        amount,
-    }
-    .abi_encode()
+    build_merge_calldata_ctf(COLLATERAL, condition_id, amount)
 }
 
-/// Calldata for `NegRiskAdapter.splitPosition(bytes32,uint256)`: merge's
-/// inverse — pull `amount` collateral, mint `amount` YES+NO on the condition.
+/// Calldata to split `amount` collateral into `amount` YES+NO on
+/// `condition_id` (merge's inverse).
 ///
-/// ⚠ The least-exercised call in this crate. The 2-arg *merge* through this
-/// identical adapter path is heavily exercised and the adapter documents the
-/// symmetric split, but verify against the deployed ABI (or split a dust
-/// amount first) before trusting it with size. Splitting requires the
-/// adapter to be approved to pull the wallet's collateral.
+/// Goes through the pUSD [`NEG_RISK_COLLATERAL_ADAPTER`] as the CTF-mirror
+/// `splitPosition(collateralToken, parentCollectionId, conditionId, partition, amount)`.
+///
+/// ⚠ The least-exercised call in this crate, and the only one **not** verified
+/// against a live on-chain tx. The heavily exercised merge takes the exact
+/// symmetric CTF-mirror form through this same adapter, so this is the
+/// consistent shape — but split a dust amount first before trusting it with
+/// size. Splitting also requires the adapter to be approved to pull the
+/// wallet's pUSD collateral.
 #[must_use]
 pub fn build_split_calldata(condition_id: &B256, amount: U256) -> Vec<u8> {
-    INegRiskAdapterOps::splitPositionCall {
-        conditionId: *condition_id,
-        amount,
-    }
-    .abi_encode()
+    build_split_calldata_ctf(COLLATERAL, condition_id, amount)
 }
 
 /// Calldata for the plain CTF `splitPosition` (non-negRisk markets):
@@ -332,23 +322,30 @@ pub fn build_merge_calldata_ctf(collateral: Address, condition_id: &B256, amount
     .abi_encode()
 }
 
-/// Calldata for `NegRiskAdapter.redeemPositions(conditionId, [yes, no])`.
+/// Calldata to redeem a resolved negRisk condition through the pUSD
+/// [`NEG_RISK_COLLATERAL_ADAPTER`].
 ///
-/// The adapter's `_amounts` is length-2, `[yesAmount, noAmount]` (index 0 =
-/// YES, index 1 = NO — the deployed contract's `NatSpec`). It pulls *exactly*
-/// these amounts from the caller, redeems them through the CTF, and unwraps
-/// the resolved payout back to the caller — so pass the wallet's **exact**
-/// on-chain balances: an amount above the held balance reverts, one below
-/// leaves a remainder unredeemed. Only meaningful once the condition is
-/// resolved (an unresolved redeem reverts in the CTF); the caller gates on
-/// that.
+/// The adapter mirrors the CTF ABI, so this is the CTF-mirror
+/// `redeemPositions(collateralToken, parentCollectionId, conditionId, indexSets)`
+/// with pUSD collateral and a zero parent collection — verified against live
+/// on-chain redeems (tx `0x2252f36d…` used `[1, 2]`, `0x7bb402a9…` used `[1]`).
+/// Unlike the legacy `redeemPositions(bytes32,uint256[])` (which took explicit
+/// `[yes, no]` amounts and REVERTS on this adapter), the CTF-mirror form takes
+/// **index sets** and redeems the caller's *full* balance of each: `yes_amount`
+/// / `no_amount` here only decide **which** sides to include (`> 0`), not how
+/// much — `YES = index set 1` (outcome slot 0), `NO = index set 2` (slot 1).
+/// Only meaningful once the condition is resolved (an unresolved redeem reverts
+/// in the CTF); the caller gates on that and filters both-zero legs.
 #[must_use]
 pub fn build_redeem_calldata(condition_id: &B256, yes_amount: U256, no_amount: U256) -> Vec<u8> {
-    INegRiskAdapterOps::redeemPositionsCall {
-        conditionId: *condition_id,
-        amounts: vec![yes_amount, no_amount],
+    let mut index_sets = Vec::with_capacity(2);
+    if yes_amount > U256::ZERO {
+        index_sets.push(U256::from(1_u64));
     }
-    .abi_encode()
+    if no_amount > U256::ZERO {
+        index_sets.push(U256::from(2_u64));
+    }
+    build_redeem_calldata_ctf(COLLATERAL, condition_id, &index_sets)
 }
 
 /// Calldata for the plain CTF `redeemPositions` (binary markets):
@@ -378,14 +375,14 @@ pub fn build_redeem_calldata_ctf(
 /// condition.
 ///
 /// `redeems` is `(condition_id, yes_amount, no_amount)`; every call targets
-/// the shared [`NEG_RISK_ADAPTER`]. The caller filters out legs with both
-/// amounts zero and gates on resolution.
+/// the shared [`NEG_RISK_COLLATERAL_ADAPTER`]. The caller filters out legs with
+/// both amounts zero and gates on resolution.
 #[must_use]
 pub fn redeem_calls(redeems: &[(B256, U256, U256)]) -> Vec<DepositWalletCall> {
     redeems
         .iter()
         .map(|(cid, yes, no)| DepositWalletCall {
-            target: NEG_RISK_ADAPTER,
+            target: NEG_RISK_COLLATERAL_ADAPTER,
             data: build_redeem_calldata(cid, *yes, *no),
         })
         .collect()
@@ -398,7 +395,7 @@ pub fn merge_calls(merges: &[(B256, U256)]) -> Vec<DepositWalletCall> {
     merges
         .iter()
         .map(|(cid, amount)| DepositWalletCall {
-            target: NEG_RISK_ADAPTER,
+            target: NEG_RISK_COLLATERAL_ADAPTER,
             data: build_merge_calldata(cid, *amount),
         })
         .collect()
@@ -414,7 +411,7 @@ pub fn split_calls(splits: &[(B256, U256)]) -> Vec<DepositWalletCall> {
     splits
         .iter()
         .map(|(cid, amount)| DepositWalletCall {
-            target: NEG_RISK_ADAPTER,
+            target: NEG_RISK_COLLATERAL_ADAPTER,
             data: build_split_calldata(cid, *amount),
         })
         .collect()
@@ -688,7 +685,7 @@ pub fn plan_calls(plans: &[EventPlan]) -> Result<Vec<PlannedCall>, Error> {
         for tier in &plan.tiers {
             calls.push(PlannedCall {
                 call: DepositWalletCall {
-                    target: NEG_RISK_ADAPTER,
+                    target: NEG_RISK_COLLATERAL_ADAPTER,
                     data: build_convert_calldata(&tier.question_ids, tier.amount)?,
                 },
                 gas: convert_gas(plan.n_legs),
@@ -757,7 +754,7 @@ mod engine {
         ConvertDelays, ConvertJob, ConvertLeg, WrapSnapshot, build_convert_calldata, fmt_usdc,
         gas_chunks, plan_calls, plan_event_from_balances, wrap_calls,
     };
-    use crate::chain::{COLLATERAL_ONRAMP, CTF, NEG_RISK_ADAPTER, POLYGON, USDC_E};
+    use crate::chain::{COLLATERAL_ONRAMP, CTF, NEG_RISK_COLLATERAL_ADAPTER, POLYGON, USDC_E};
     use crate::error::Error;
     use crate::relayer::{DepositWalletCall, RelayerClient};
 
@@ -1320,7 +1317,7 @@ mod engine {
             relayer,
             wallet,
             &[DepositWalletCall {
-                target: NEG_RISK_ADAPTER,
+                target: NEG_RISK_COLLATERAL_ADAPTER,
                 data: convert_data,
             }],
             "convert",
@@ -1630,37 +1627,44 @@ mod tests {
     }
 
     #[test]
-    fn merge_calldata_selector() {
+    fn merge_calldata_uses_ctf_mirror_overload() {
+        // The collateral adapter's legacy 2-arg mergePositions reverts; the
+        // working entrypoint is the CTF-mirror form with pUSD collateral.
         let cid = B256::repeat_byte(0x11);
         let data = build_merge_calldata(&cid, U256::from(1_u64));
-        assert_eq!(data.len(), 68);
+        assert_eq!(data.len(), 4 + 8 * 32);
         assert_eq!(
             &data[..4],
-            &keccak256(b"mergePositions(bytes32,uint256)")[..4]
+            &keccak256(b"mergePositions(address,bytes32,bytes32,uint256[],uint256)")[..4]
         );
+        // Byte-identical to the explicit CTF-mirror builder with pUSD collateral.
+        assert_eq!(data, build_merge_calldata_ctf(COLLATERAL, &cid, U256::from(1_u64)));
+
+        let calls = merge_calls(&[(cid, U256::from(1_u64))]);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].target, NEG_RISK_COLLATERAL_ADAPTER);
+        assert_eq!(calls[0].data, data);
     }
 
     #[test]
-    fn split_calldata_selector_mirrors_merge() {
-        // The 2-arg adapter split is the exact structural mirror of the
-        // heavily exercised 2-arg merge.
+    fn split_calldata_uses_ctf_mirror_overload() {
+        // Split takes the exact symmetric CTF-mirror shape of the verified
+        // merge, through the same collateral adapter.
         let cid = B256::repeat_byte(0x22);
         let data = build_split_calldata(&cid, U256::from(5_000_000_u64));
-        assert_eq!(data.len(), 68);
+        assert_eq!(data.len(), 4 + 8 * 32);
         assert_eq!(
             &data[..4],
-            &keccak256(b"splitPosition(bytes32,uint256)")[..4]
+            &keccak256(b"splitPosition(address,bytes32,bytes32,uint256[],uint256)")[..4]
         );
-        // Args ride verbatim: conditionId word then amount word.
-        assert_eq!(&data[4..36], cid.as_slice());
         assert_eq!(
-            U256::from_be_slice(&data[36..68]),
-            U256::from(5_000_000_u64)
+            data,
+            build_split_calldata_ctf(COLLATERAL, &cid, U256::from(5_000_000_u64))
         );
 
         let calls = split_calls(&[(cid, U256::from(5_000_000_u64))]);
         assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].target, NEG_RISK_ADAPTER);
+        assert_eq!(calls[0].target, NEG_RISK_COLLATERAL_ADAPTER);
         assert_eq!(calls[0].data, data);
     }
 
@@ -1688,23 +1692,31 @@ mod tests {
     }
 
     #[test]
-    fn redeem_calldata_selector_layout_and_target() {
+    fn redeem_calldata_uses_ctf_mirror_overload() {
         let cid = "aa0edfa656a0e70bf8c63f09438cd70979fef8e31fcc62d80840b5a375a55403"
             .parse::<B256>()
             .unwrap();
+        // Only YES held → the single index set [1]; CTF-mirror redeem.
         let data = build_redeem_calldata(&cid, U256::from(523_000_000_u64), U256::ZERO);
-        // selector(4) + conditionId(32) + array offset(32) + len(32) + 2 elems(2*32) = 164
-        assert_eq!(data.len(), 164);
-        let selector = &keccak256(b"redeemPositions(bytes32,uint256[])")[..4];
-        assert_eq!(&data[..4], selector);
+        // selector(4) + collateral + parent + conditionId + offset + len + 1 elem = 4 + 6*32
+        assert_eq!(data.len(), 4 + 6 * 32);
+        assert_eq!(
+            &data[..4],
+            &keccak256(b"redeemPositions(address,bytes32,bytes32,uint256[])")[..4]
+        );
+        // Held-side inclusion, not amounts: YES>0,NO=0 ⇒ index sets [1].
+        assert_eq!(
+            data,
+            build_redeem_calldata_ctf(COLLATERAL, &cid, &[U256::from(1_u64)])
+        );
 
-        // redeem_calls wraps the same calldata against the shared adapter.
+        // Both sides held ⇒ both index sets, against the collateral adapter.
         let calls = redeem_calls(&[(cid, U256::from(1_u64), U256::from(2_u64))]);
         assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].target, NEG_RISK_ADAPTER);
+        assert_eq!(calls[0].target, NEG_RISK_COLLATERAL_ADAPTER);
         assert_eq!(
             calls[0].data,
-            build_redeem_calldata(&cid, U256::from(1_u64), U256::from(2_u64))
+            build_redeem_calldata_ctf(COLLATERAL, &cid, &[U256::from(1_u64), U256::from(2_u64)])
         );
     }
 
@@ -2033,22 +2045,22 @@ mod tests {
         // out post-batch by balance read; an in-batch proceeds-sized wrap is
         // rejected by the relayer's simulation).
         assert_eq!(calls.len(), 3);
-        assert_eq!(calls[0].call.target, NEG_RISK_ADAPTER);
+        assert_eq!(calls[0].call.target, NEG_RISK_COLLATERAL_ADAPTER);
         assert_eq!(
             calls[0].call.data[..4],
-            INegRiskAdapterOps::mergePositionsCall::SELECTOR
+            ICtfOps::mergePositionsCall::SELECTOR
         );
         assert_eq!(calls[0].gas, MERGE_GAS);
-        assert_eq!(calls[1].call.target, NEG_RISK_ADAPTER);
+        assert_eq!(calls[1].call.target, NEG_RISK_COLLATERAL_ADAPTER);
         assert_eq!(
             calls[1].call.data[..4],
             INegRiskAdapterOps::convertPositionsCall::SELECTOR
         );
         assert_eq!(calls[1].gas, convert_gas(4));
-        assert_eq!(calls[2].call.target, NEG_RISK_ADAPTER);
+        assert_eq!(calls[2].call.target, NEG_RISK_COLLATERAL_ADAPTER);
         assert_eq!(
             calls[2].call.data[..4],
-            INegRiskAdapterOps::mergePositionsCall::SELECTOR
+            ICtfOps::mergePositionsCall::SELECTOR
         );
         assert_eq!(calls[2].gas, MERGE_GAS);
     }
@@ -2084,7 +2096,7 @@ mod tests {
     fn pc(gas: u64) -> PlannedCall {
         PlannedCall {
             call: DepositWalletCall {
-                target: NEG_RISK_ADAPTER,
+                target: NEG_RISK_COLLATERAL_ADAPTER,
                 data: Vec::new(),
             },
             gas,
@@ -2135,7 +2147,7 @@ mod tests {
 
     #[test]
     fn wrap_calls_shapes() {
-        let wallet = NEG_RISK_ADAPTER; // any address works for the shape test
+        let wallet = NEG_RISK_COLLATERAL_ADAPTER; // any address works for the shape test
         let no_approve = wrap_calls(wallet, U256::from(5_u64), false);
         assert_eq!(no_approve.len(), 1);
         assert_eq!(no_approve[0].target, COLLATERAL_ONRAMP);

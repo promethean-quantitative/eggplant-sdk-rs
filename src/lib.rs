@@ -10,7 +10,8 @@
 //!   for latency-critical order placement and cancellation.
 //! - **Relayer operations** — gasless merge / split / convert / redeem for
 //!   negRisk positions through Polymarket's relayer, including the
-//!   `DepositWallet` batch path.
+//!   `DepositWallet` batch path, plus a [`sweep`] safety net that settles
+//!   every held position in one pass.
 //! - **Market data** — lenient order-book fetching, Gamma API events, Data
 //!   API positions, and WebSocket streams for both the market and user
 //!   channels (zero-copy parsing available on the hot path).
@@ -36,6 +37,7 @@ pub mod fee;
 pub mod gamma;
 pub mod redeem;
 pub mod relayer;
+pub mod sweep;
 #[cfg(feature = "ws")]
 pub mod ws;
 

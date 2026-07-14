@@ -445,6 +445,8 @@ behind `EGGPLANT_LIVE_TRADE=1`, everything else is read-only:
 | `positions`           | Data API holdings + redeemable listing                                         |
 | `convert_merge_split` | Gamma → legs → read-only plan → optional relayer cycle; split builders         |
 | `approvals_bootstrap` | Safe-path approvals bootstrap                                                  |
+| `redeem`              | discover redeemable positions → drain them in gas-bounded batches              |
+| `sweep`               | discover holdings → dry-run report → optional merge/convert of every held event |
 
 ```sh
 POLYMARKET_PRIVATE_KEY=0x… cargo run --example quickstart
@@ -458,6 +460,8 @@ TOKEN_IDS=<id> cargo run --example stream_order_books
 | `clob`                         | `ClobClient` (auth, market/tick metadata, open orders, trades, cancel-all), `signing` (all-type `OrderSigner`), `poster` (`FastPoster` hot writes), `books` (lenient `/books`), `tick` (venue size rules), `types` |
 | `relayer`                      | `RelayerClient`: SAFE / SAFE-CREATE / DepositWallet batch submission + EIP-712 hash builders                                                                                                                       |
 | `convert`                      | merge/split/convert/redeem calldata, the tier planner, and (with `rpc`) the balance-read → plan → submit → wrap engine                                                                                             |
+| `redeem`                       | (`rpc`) discover a wallet's redeemable positions and drain them in gas-bounded batches                                                                                                                             |
+| `sweep`                        | (`rpc`) discover every held negRisk event (Data API + Gamma) and run the merge/convert cycle over all of them — the safety net ([docs/SWEEP.md](docs/SWEEP.md))                                                     |
 | `approval`                     | (`rpc`) Safe-path approvals bootstrap                                                                                                                                                                              |
 | `ws`                           | market + user streams, zero-copy events, liveness, recycle phasing, `our_maker_side`, `SeenIds`                                                                                                                    |
 | `gamma`, `data`                | event metadata and wallet positions                                                                                                                                                                                |

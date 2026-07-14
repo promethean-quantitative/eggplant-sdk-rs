@@ -14,7 +14,9 @@ use alloy::signers::Signer;
 use alloy::sol;
 use alloy::sol_types::SolCall as _;
 
-use crate::chain::{POLYGON, contract_config, derive_safe_wallet, wallet_config};
+use crate::chain::{
+    NEG_RISK_COLLATERAL_ADAPTER, POLYGON, contract_config, derive_safe_wallet, wallet_config,
+};
 use crate::error::Error;
 use crate::relayer::RelayerClient;
 
@@ -38,10 +40,12 @@ sol! {
 }
 
 /// Ensure the signer's Safe wallet exists and holds the approvals negRisk
-/// trading needs (pUSD + CTF, for the V2 exchange and the negRisk adapter).
+/// trading and position ops need.
 ///
-/// Idempotent: existing approvals are detected and skipped. A missing Safe is
-/// deployed through the relayer first.
+/// Grants pUSD + CTF approvals for the V2 exchange, the legacy negRisk adapter,
+/// and the pUSD collateral adapter that convert / merge / redeem now route
+/// through. Idempotent: existing approvals are detected and skipped. A missing
+/// Safe is deployed through the relayer first.
 pub async fn ensure_approvals<S: Signer + Sync>(
     signer: &S,
     relayer: &RelayerClient,
@@ -64,6 +68,10 @@ pub async fn ensure_approvals<S: Signer + Sync>(
     if let Some(adapter) = neg_risk_config.neg_risk_adapter {
         targets.push(("Neg Risk Adapter", adapter));
     }
+    // The pUSD collateral adapter is the relayer-allowlisted entry point for
+    // convert / merge / redeem / split since the pUSD migration; it must be a
+    // CTF operator (and pUSD-approved, for split) to pull the wallet's tokens.
+    targets.push(("Neg Risk Collateral Adapter", NEG_RISK_COLLATERAL_ADAPTER));
 
     let provider = ProviderBuilder::new()
         .connect(rpc_url)
