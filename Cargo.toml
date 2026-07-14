@@ -77,6 +77,10 @@ required-features = ["rpc"]
 name = "redeem"
 required-features = ["rpc"]
 
+[[example]]
+name = "sweep"
+required-features = ["rpc"]
+
 [lints.rust]
 unsafe_code = "forbid"
 
