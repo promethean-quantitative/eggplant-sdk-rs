@@ -128,8 +128,7 @@ pub fn classify_event(
     }
 
     let mergeable = merge_pairs > 0;
-    let convertible =
-        convert_legs > 1 || (convert_legs == 1 && min_no >= single_leg_min_qty);
+    let convertible = convert_legs > 1 || (convert_legs == 1 && min_no >= single_leg_min_qty);
 
     EventClassification {
         merge_pairs,
@@ -159,8 +158,8 @@ mod engine {
     use super::{EventClassification, classify_event, leg_sizes};
     use crate::convert::{ConvertDelays, ConvertJob, ConvertLeg, convert_legs, process_job};
     use crate::data::{DataApiClient, Position};
-    use crate::gamma::{GammaClient, GammaMarket};
     use crate::error::Error;
+    use crate::gamma::{GammaClient, GammaMarket};
     use crate::relayer::RelayerClient;
 
     /// A held negRisk event resolved to its full leg set (from Gamma).
@@ -429,7 +428,12 @@ mod tests {
     fn leg_sizes_maps_tokens_to_legs_and_sides() {
         let legs = [leg(1, true, true), leg(2, false, true)];
         // leg1: NO=2001 (held 10), YES=1001 (held 4); leg2: NO=2002 (held 7).
-        let positions = [pos(2001, 10.0), pos(1001, 4.0), pos(2002, 7.0), pos(9999, 5.0)];
+        let positions = [
+            pos(2001, 10.0),
+            pos(1001, 4.0),
+            pos(2002, 7.0),
+            pos(9999, 5.0),
+        ];
         let sizes = leg_sizes(&legs, &positions);
         assert_eq!(sizes, vec![(10.0, 4.0), (7.0, 0.0)]);
     }

@@ -1638,7 +1638,10 @@ mod tests {
             &keccak256(b"mergePositions(address,bytes32,bytes32,uint256[],uint256)")[..4]
         );
         // Byte-identical to the explicit CTF-mirror builder with pUSD collateral.
-        assert_eq!(data, build_merge_calldata_ctf(COLLATERAL, &cid, U256::from(1_u64)));
+        assert_eq!(
+            data,
+            build_merge_calldata_ctf(COLLATERAL, &cid, U256::from(1_u64))
+        );
 
         let calls = merge_calls(&[(cid, U256::from(1_u64))]);
         assert_eq!(calls.len(), 1);
